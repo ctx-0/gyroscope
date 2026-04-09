@@ -2,7 +2,7 @@
 
 I wanted to demonstrate Gyroscope API and raw data from Generic Sensor API.
 
-**[[Live Demo]](https://ctx-0.github.io/gyro/)**
+*[Live Demo](https://ctx-0.github.io/gyroscope/)*
 
 
 - **Gyroscope Mode** – Relative rotation using integrated angular velocity (shows drift over time)
