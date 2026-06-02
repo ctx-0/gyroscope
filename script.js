@@ -66,6 +66,64 @@ const valZ = document.getElementById('val-z');
 const modeGyro = document.getElementById('modeGyro');
 const modeAbs = document.getElementById('modeAbs');
 
+function setSensorEnabled(enabled) {
+    sensorEnabled = enabled;
+    sensorBtn.classList.toggle('active', enabled);
+    sensorData.classList.toggle('active', enabled);
+}
+
+function handleSensorError(label, event) {
+    sensorStatus.textContent = `${label}: ${event.error.name}`;
+    if (event.currentTarget === activeSensor) {
+        stopSensor();
+        setSensorEnabled(false);
+    }
+}
+
+function startSensor(sensor, label) {
+    return new Promise((resolve) => {
+        let settled = false;
+
+        const finish = (success, error) => {
+            if (settled) return;
+            settled = true;
+            sensor.removeEventListener('activate', onActivate);
+            sensor.removeEventListener('error', onError);
+            if (error) {
+                sensorStatus.textContent = `${label}: ${error.name}`;
+            }
+            resolve(success);
+        };
+
+        const onActivate = () => finish(true);
+        const onError = (event) => finish(false, event.error);
+
+        sensor.addEventListener('activate', onActivate);
+        sensor.addEventListener('error', onError);
+
+        try {
+            sensor.start();
+        } catch (error) {
+            finish(false, error);
+        }
+    });
+}
+
+async function hasSensorPermissions(names) {
+    if (!navigator.permissions?.query) {
+        return true;
+    }
+
+    try {
+        const results = await Promise.all(
+            names.map((name) => navigator.permissions.query({ name }))
+        );
+        return results.every((result) => result.state !== 'denied');
+    } catch {
+        return true;
+    }
+}
+
 // Load model
 const fbxLoader = new FBXLoader();
 fbxLoader.load(
@@ -113,29 +171,33 @@ async function initGyroscope() {
     }
 
     try {
-        activeSensor = new Gyroscope({ frequency: 60 });
+        const sensor = new Gyroscope({ frequency: 60 });
+        activeSensor = sensor;
         
-        activeSensor.addEventListener('reading', () => {
+        sensor.addEventListener('reading', () => {
             // Integrate angular velocity over elapsed time.
-            const now = activeSensor.timestamp;
+            const now = sensor.timestamp;
             const dt = lastGyroTimestamp === null ? 0 : (now - lastGyroTimestamp) / 1000;
             lastGyroTimestamp = now;
 
             const sensitivity = 1.5;
-            rotationX += activeSensor.x * dt * sensitivity;
-            rotationY += activeSensor.y * dt * sensitivity;
-            rotationZ += activeSensor.z * dt * sensitivity;
+            rotationX += sensor.x * dt * sensitivity;
+            rotationY += sensor.y * dt * sensitivity;
+            rotationZ += sensor.z * dt * sensitivity;
             
-            valX.textContent = activeSensor.x.toFixed(3);
-            valY.textContent = activeSensor.y.toFixed(3);
-            valZ.textContent = activeSensor.z.toFixed(3);
+            valX.textContent = sensor.x.toFixed(3);
+            valY.textContent = sensor.y.toFixed(3);
+            valZ.textContent = sensor.z.toFixed(3);
         });
 
-        activeSensor.addEventListener('error', (event) => {
-            sensorStatus.textContent = `gyro: ${event.error.name}`;
-        });
+        sensor.addEventListener('error', (event) => handleSensorError('gyro', event));
 
-        await activeSensor.start();
+        const started = await startSensor(sensor, 'gyro');
+        if (!started) {
+            stopSensor();
+            return false;
+        }
+
         sensorStatus.textContent = 'gyro: active';
         return true;
     } catch (error) {
@@ -152,21 +214,18 @@ async function initAbsoluteOrientation() {
     }
 
     try {
-        // Request permission if needed
-        if (typeof DeviceOrientationEvent !== 'undefined' && 
-            typeof DeviceOrientationEvent.requestPermission === 'function') {
-            const permission = await DeviceOrientationEvent.requestPermission();
-            if (permission !== 'granted') {
-                sensorStatus.textContent = 'absolute: permission denied';
-                return false;
-            }
+        const permitted = await hasSensorPermissions(['accelerometer', 'gyroscope', 'magnetometer']);
+        if (!permitted) {
+            sensorStatus.textContent = 'absolute: permission denied';
+            return false;
         }
 
-        activeSensor = new AbsoluteOrientationSensor({ frequency: 60 });
+        const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
+        activeSensor = sensor;
         
-        activeSensor.addEventListener('reading', () => {
+        sensor.addEventListener('reading', () => {
             // Quaternion: [x, y, z, w]
-            targetQuaternion.fromArray(activeSensor.quaternion);
+            targetQuaternion.fromArray(sensor.quaternion);
             
             // Display euler angles for UI
             const euler = new THREE.Euler().setFromQuaternion(targetQuaternion);
@@ -175,11 +234,14 @@ async function initAbsoluteOrientation() {
             valZ.textContent = euler.z.toFixed(2);
         });
 
-        activeSensor.addEventListener('error', (event) => {
-            sensorStatus.textContent = `absolute: ${event.error.name}`;
-        });
+        sensor.addEventListener('error', (event) => handleSensorError('absolute', event));
 
-        await activeSensor.start();
+        const started = await startSensor(sensor, 'absolute');
+        if (!started) {
+            stopSensor();
+            return false;
+        }
+
         sensorStatus.textContent = 'absolute: active';
         return true;
     } catch (error) {
@@ -212,17 +274,15 @@ async function initSensor() {
 async function toggleSensor() {
     if (sensorEnabled) {
         stopSensor();
-        sensorEnabled = false;
-        sensorBtn.classList.remove('active');
+        setSensorEnabled(false);
         sensorStatus.textContent = `${sensorMode}: paused`;
-        sensorData.classList.remove('active');
+        return false;
     } else {
         const success = await initSensor();
         if (success) {
-            sensorEnabled = true;
-            sensorBtn.classList.add('active');
-            sensorData.classList.add('active');
+            setSensorEnabled(true);
         }
+        return success;
     }
 }
 
@@ -242,7 +302,8 @@ async function switchMode(mode) {
     
     // Restart sensor if active
     if (sensorEnabled) {
-        await initSensor();
+        const success = await initSensor();
+        setSensorEnabled(success);
     } else {
         sensorStatus.textContent = `${mode}: standby`;
     }
@@ -279,8 +340,10 @@ window.addEventListener('resize', () => {
 
 // Start prompt
 document.getElementById('start-btn').addEventListener('click', async () => {
-    document.getElementById('start-prompt').classList.add('hidden');
-    await toggleSensor();
+    const success = await toggleSensor();
+    if (success) {
+        document.getElementById('start-prompt').classList.add('hidden');
+    }
 });
 
 // Sensor toggle
