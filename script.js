@@ -50,6 +50,7 @@ let activeSensor = null;
 
 // Gyroscope values
 let rotationX = 0, rotationY = 0, rotationZ = 0;
+let lastGyroTimestamp = null;
 
 // Absolute orientation quaternion
 const targetQuaternion = new THREE.Quaternion();
@@ -115,11 +116,15 @@ async function initGyroscope() {
         activeSensor = new Gyroscope({ frequency: 60 });
         
         activeSensor.addEventListener('reading', () => {
-            // Direct integration of gyroscope values
+            // Integrate angular velocity over elapsed time.
+            const now = activeSensor.timestamp;
+            const dt = lastGyroTimestamp === null ? 0 : (now - lastGyroTimestamp) / 1000;
+            lastGyroTimestamp = now;
+
             const sensitivity = 1.5;
-            rotationX += activeSensor.x * sensitivity;
-            rotationY += activeSensor.y * sensitivity;
-            rotationZ += activeSensor.z * sensitivity;
+            rotationX += activeSensor.x * dt * sensitivity;
+            rotationY += activeSensor.y * dt * sensitivity;
+            rotationZ += activeSensor.z * dt * sensitivity;
             
             valX.textContent = activeSensor.x.toFixed(3);
             valY.textContent = activeSensor.y.toFixed(3);
@@ -189,6 +194,7 @@ function stopSensor() {
         activeSensor.stop();
         activeSensor = null;
     }
+    lastGyroTimestamp = null;
 }
 
 // Initialize based on mode
@@ -232,6 +238,7 @@ async function switchMode(mode) {
     
     // Reset rotation values
     rotationX = rotationY = rotationZ = 0;
+    lastGyroTimestamp = null;
     
     // Restart sensor if active
     if (sensorEnabled) {
@@ -286,6 +293,7 @@ modeAbs.addEventListener('click', () => switchMode('absolute'));
 // Reset
 document.getElementById('resetBtn').addEventListener('click', () => {
     rotationX = rotationY = rotationZ = 0;
+    lastGyroTimestamp = null;
     targetQuaternion.set(0, 0, 0, 1);
     currentQuaternion.set(0, 0, 0, 1);
     
