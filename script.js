@@ -65,6 +65,17 @@ const valY = document.getElementById('val-y');
 const valZ = document.getElementById('val-z');
 const modeGyro = document.getElementById('modeGyro');
 const modeAbs = document.getElementById('modeAbs');
+const startPrompt = document.getElementById('start-prompt');
+const startBtn = document.getElementById('start-btn');
+const desktopSensorHint = document.getElementById('desktop-sensor-hint');
+
+// Desktop users can control the model with OrbitControls and do not need a
+// physical motion sensor to enter the demo.
+const usesDesktopControls = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+function showDesktopSensorStatus() {
+    sensorStatus.textContent = `${sensorMode}: unavailable`;
+}
 
 function setSensorEnabled(enabled) {
     sensorEnabled = enabled;
@@ -307,6 +318,10 @@ async function switchMode(mode) {
     } else {
         sensorStatus.textContent = `${mode}: standby`;
     }
+
+    if (usesDesktopControls) {
+        showDesktopSensorStatus();
+    }
 }
 
 // Animation loop
@@ -339,15 +354,29 @@ window.addEventListener('resize', () => {
 });
 
 // Start prompt
-document.getElementById('start-btn').addEventListener('click', async () => {
+startBtn.addEventListener('click', async () => {
     const success = await toggleSensor();
     if (success) {
-        document.getElementById('start-prompt').classList.add('hidden');
+        startPrompt.classList.add('hidden');
     }
 });
 
+// Desktop can enter immediately and use mouse/trackpad controls without a
+// physical motion sensor.
+if (usesDesktopControls) {
+    showDesktopSensorStatus();
+    sensorData.classList.add('active');
+    desktopSensorHint.classList.add('active');
+    startPrompt.classList.add('hidden');
+}
+
 // Sensor toggle
-sensorBtn.addEventListener('click', toggleSensor);
+sensorBtn.addEventListener('click', async () => {
+    await toggleSensor();
+    if (usesDesktopControls && !sensorEnabled) {
+        showDesktopSensorStatus();
+    }
+});
 
 // Mode switches
 modeGyro.addEventListener('click', () => switchMode('gyro'));
